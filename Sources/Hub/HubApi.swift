@@ -7,7 +7,9 @@
 
 import Crypto
 import Foundation
+#if canImport(Network)
 import Network
+#endif
 import os
 
 /// https://datatracker.ietf.org/doc/html/rfc7540#section-8.1.2
@@ -75,7 +77,7 @@ public struct HubApi: Sendable {
     var useBackgroundSession: Bool
     var useOfflineMode: Bool?
 
-    private let networkMonitor = NetworkMonitor()
+    private let networkMonitor: NetworkMonitor = NetworkMonitor()
     public typealias RepoType = Hub.RepoType
     public typealias Repo = Hub.Repo
 
@@ -828,8 +830,16 @@ public extension HubApi {
 /// Network monitor helper class to help decide whether to use offline mode
 extension HubApi {
     private actor NetworkStateActor {
-        /// Assume best case connection until updated by the monitor
         public var isConnected: Bool = true
+
+        func shouldUseOfflineMode() -> Bool {
+            if ProcessInfo.processInfo.environment["CI_DISABLE_NETWORK_MONITOR"] == "1" {
+                return false
+            }
+            return !isConnected
+        }
+
+#if canImport(Network)
         public var isExpensive: Bool = false
         public var isConstrained: Bool = false
 
@@ -838,15 +848,10 @@ extension HubApi {
             isExpensive = path.isExpensive
             isConstrained = path.isConstrained
         }
-
-        func shouldUseOfflineMode() -> Bool {
-            if ProcessInfo.processInfo.environment["CI_DISABLE_NETWORK_MONITOR"] == "1" {
-                return false
-            }
-            return !isConnected
-        }
+#endif
     }
 
+#if canImport(Network)
     private final class NetworkMonitor: Sendable {
         private let monitor: NWPathMonitor
         private let queue: DispatchQueue
@@ -868,7 +873,6 @@ extension HubApi {
                     await self.state.update(path: path)
                 }
             }
-
             monitor.start(queue: queue)
         }
 
@@ -880,6 +884,13 @@ extension HubApi {
             stopMonitoring()
         }
     }
+#else
+    private final class NetworkMonitor: Sendable {
+        public let state: NetworkStateActor = .init()
+        static let shared = NetworkMonitor()
+        func startMonitoring() {}
+    }
+#endif
 }
 
 /// Convenience methods that use the shared `HubApi` instance
