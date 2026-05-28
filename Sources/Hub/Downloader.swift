@@ -73,11 +73,13 @@ final class Downloader: NSObject, Sendable {
         let sessionIdentifier = "swift-transformers.hub.downloader"
 
         var config = URLSessionConfiguration.default
+        #if canImport(Darwin)
         if inBackground {
             config = URLSessionConfiguration.background(withIdentifier: sessionIdentifier)
             config.isDiscretionary = false
             config.sessionSendsLaunchEvents = true
         }
+        #endif
         sessionConfig = config
     }
 
@@ -135,6 +137,7 @@ final class Downloader: NSObject, Sendable {
         numRetries: Int
     ) async {
         let resumeSize = Self.incompleteFileSize(at: incompleteDestination)
+        #if canImport(Darwin)
         guard let tasks = await session.get()?.allTasks else {
             return
         }
@@ -154,6 +157,7 @@ final class Downloader: NSObject, Sendable {
                 existing.cancel()
             }
         }
+        #endif
 
         await task.set(
             Task {
@@ -245,7 +249,13 @@ final class Downloader: NSObject, Sendable {
         }
 
         // Start the download and get the byte stream
+        #if canImport(Darwin)
         let (asyncBytes, response) = try await session.bytes(for: newRequest)
+        #else
+        let (bodyData, response) = try await session.data(for: newRequest)
+        let asyncBytes = bodyData.makeAsyncIterator()
+        _ = asyncBytes // suppress unused warning — Linux path uses bodyData directly below
+        #endif
 
         guard let response = response as? HTTPURLResponse else {
             throw DownloadError.unexpectedError
@@ -254,6 +264,13 @@ final class Downloader: NSObject, Sendable {
         guard (200..<300).contains(response.statusCode) else {
             throw DownloadError.unexpectedError
         }
+
+        #if !canImport(Darwin)
+        // On Linux, write the full response body directly (no streaming bytes API).
+        try tempFile.write(contentsOf: bodyData)
+        await downloadResumeState.incDownloadedSize(bodyData.count)
+        return
+        #endif
 
         // Create a buffer to collect bytes before writing to disk
         var buffer = Data(capacity: chunkSize)

@@ -17,6 +17,13 @@ import Network
 import os
 #endif
 
+#if !canImport(Darwin)
+@inline(__always)
+private func autoreleasepool<T>(invoking body: () throws -> T) rethrows -> T {
+    return try body()
+}
+#endif
+
 /// https://datatracker.ietf.org/doc/html/rfc7540#section-8.1.2
 /// `requests` in Python leaves headers as their original casing,
 /// where as Swift strictly adheres to RFC 7540 and can force lower case.
