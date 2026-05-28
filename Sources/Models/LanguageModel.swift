@@ -572,9 +572,9 @@ public enum TokenizerError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .tokenizerConfigNotFound:
-            String(localized: "Tokenizer configuration could not be found. The model may be missing required tokenizer files.", comment: "Error when tokenizer configuration is missing")
+            "Tokenizer configuration could not be found. The model may be missing required tokenizer files."
         case .missingConfig:
-            String(localized: "Language model configuration was not set, tokenizer assets could not be loaded.", comment: "Error when configuration needed for tokenizer data is missing")
+            "Language model configuration was not set, tokenizer assets could not be loaded."
         }
     }
 }
