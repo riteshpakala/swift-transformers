@@ -255,12 +255,7 @@ public struct Config: Hashable, Sendable,
                     Config(obj.intValue)
                 }
                 #else
-                let typeChar = String(cString: obj.objCType)
-                if typeChar == "f" || typeChar == "d" {
-                    Config(obj.floatValue)
-                } else {
-                    Config(obj.intValue)
-                }
+                ["f", "d"].contains(String(cString: obj.objCType)) ? Config(obj.floatValue) : Config(obj.intValue)
                 #endif
             case _ as NSNull:
                 Config()

@@ -5,12 +5,6 @@
 //  Created by Pedro Cuenca on 7/5/23.
 //
 
-#if canImport(CoreML)
-import CoreML
-
-import CoreML
-import Tokenizers
-
 /// Supported text generation modes.
 public enum GenerationMode {
     /// Contrastive search generation mode
@@ -26,6 +20,12 @@ public enum GenerationMode {
     /// Unsupported generation mode
     case unsupported
 }
+
+#if canImport(CoreML)
+import CoreML
+
+import CoreML
+import Tokenizers
 
 /// Array of token IDs representing input tokens.
 public typealias InputTokens = [Int]
