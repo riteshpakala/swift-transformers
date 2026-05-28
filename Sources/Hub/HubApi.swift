@@ -10,7 +10,9 @@ import Foundation
 #if canImport(Network)
 import Network
 #endif
+#if canImport(os)
 import os
+#endif
 
 /// https://datatracker.ietf.org/doc/html/rfc7540#section-8.1.2
 /// `requests` in Python leaves headers as their original casing,
@@ -126,7 +128,17 @@ public struct HubApi: Sendable {
     /// The shared Hub API instance with default configuration.
     public static let shared = HubApi()
 
+#if canImport(os)
     private static let logger = Logger()
+#else
+    private struct _Logger {
+        func warning(_ msg: @autoclosure () -> String) { print("[HubApi warning]", msg()) }
+        func error(_ msg: @autoclosure () -> String) { print("[HubApi error]", msg()) }
+        func info(_ msg: @autoclosure () -> String) {}
+        func debug(_ msg: @autoclosure () -> String) {}
+    }
+    private static let logger = _Logger()
+#endif
 }
 
 private extension HubApi {
