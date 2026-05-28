@@ -248,86 +248,54 @@ final class Downloader: NSObject, Sendable {
             await newRequest.setValue("bytes=\(downloadResumeState.downloadedSize)-", forHTTPHeaderField: "Range")
         }
 
-        // Start the download and get the byte stream
         #if canImport(Darwin)
+        // Streaming byte-by-byte download (Darwin only — FoundationNetworking lacks AsyncBytes)
         let (asyncBytes, response) = try await session.bytes(for: newRequest)
-        #else
-        let (bodyData, response) = try await session.data(for: newRequest)
-        let asyncBytes = bodyData.makeAsyncIterator()
-        _ = asyncBytes // suppress unused warning — Linux path uses bodyData directly below
-        #endif
 
         guard let response = response as? HTTPURLResponse else {
             throw DownloadError.unexpectedError
         }
-
         guard (200..<300).contains(response.statusCode) else {
             throw DownloadError.unexpectedError
         }
 
-        #if !canImport(Darwin)
-        // On Linux, write the full response body directly (no streaming bytes API).
-        try tempFile.write(contentsOf: bodyData)
-        await downloadResumeState.incDownloadedSize(bodyData.count)
-        return
-        #endif
-
-        // Create a buffer to collect bytes before writing to disk
         var buffer = Data(capacity: chunkSize)
-
-        // Track speed (bytes per second) using sampling between broadcasts
         var lastSampleTime = Date()
         var totalDownloadedLocal = await downloadResumeState.downloadedSize
         var lastSampleBytes = totalDownloadedLocal
-
         var newNumRetries = numRetries
         do {
-            // Batch collect bytes to reduce Data.append() overhead
-            // Use ContiguousArray for better performance (no NSArray bridging overhead)
-            let batchSize = 16384 // 16 kB
+            let batchSize = 16384
             var byteBatch = ContiguousArray<UInt8>()
             byteBatch.reserveCapacity(batchSize)
 
             for try await byte in asyncBytes {
                 byteBatch.append(byte)
-
-                // Append batch to main buffer
                 if byteBatch.count >= batchSize {
                     buffer.append(contentsOf: byteBatch)
                     byteBatch.removeAll(keepingCapacity: true)
                 }
-
-                // When buffer is full, write to disk
                 if buffer.count >= chunkSize {
-                    if !buffer.isEmpty { // Filter out keep-alive chunks
+                    if !buffer.isEmpty {
                         try tempFile.write(contentsOf: buffer)
                         let bytesWritten = buffer.count
                         buffer.removeAll(keepingCapacity: true)
-
                         totalDownloadedLocal += bytesWritten
                         await downloadResumeState.incDownloadedSize(bytesWritten)
                         newNumRetries = 5
                         guard let expectedSize = await downloadResumeState.expectedSize else { continue }
                         let progress = expectedSize != 0 ? Double(totalDownloadedLocal) / Double(expectedSize) : 0
-
-                        // Compute instantaneous speed based on bytes since last broadcast
                         let now = Date()
                         let elapsed = now.timeIntervalSince(lastSampleTime)
                         let deltaBytes = totalDownloadedLocal - lastSampleBytes
                         let speed = elapsed > 0 ? Double(deltaBytes) / elapsed : nil
                         lastSampleTime = now
                         lastSampleBytes = totalDownloadedLocal
-
                         await broadcaster.broadcast(state: .downloading(progress, speed))
                     }
                 }
             }
-
-            // Flush remaining bytes from batch
-            if !byteBatch.isEmpty {
-                buffer.append(contentsOf: byteBatch)
-            }
-
+            if !byteBatch.isEmpty { buffer.append(contentsOf: byteBatch) }
             if !buffer.isEmpty {
                 try tempFile.write(contentsOf: buffer)
                 totalDownloadedLocal += buffer.count
@@ -336,26 +304,32 @@ final class Downloader: NSObject, Sendable {
                 newNumRetries = 5
             }
         } catch let error as URLError {
-            if newNumRetries <= 0 {
-                throw error
-            }
+            if newNumRetries <= 0 { throw error }
             try await Task.sleep(nanoseconds: 1_000_000_000)
-
             await self.session.set(URLSession(configuration: self.sessionConfig, delegate: self, delegateQueue: nil))
-
-            try await httpGet(
-                request: request,
-                tempFile: tempFile,
-                numRetries: newNumRetries - 1
-            )
+            try await httpGet(request: request, tempFile: tempFile, numRetries: newNumRetries - 1)
             return
         }
 
-        // Verify the downloaded file size matches the expected size
         let actualSize = try tempFile.seekToEnd()
         if let expectedSize = await downloadResumeState.expectedSize, expectedSize != actualSize {
             throw DownloadError.unexpectedError
         }
+
+        #else
+        // Linux: FoundationNetworking lacks AsyncBytes — download all at once
+        let (bodyData, response) = try await session.data(for: newRequest)
+
+        guard let response = response as? HTTPURLResponse else {
+            throw DownloadError.unexpectedError
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            throw DownloadError.unexpectedError
+        }
+
+        try tempFile.write(contentsOf: bodyData)
+        await downloadResumeState.incDownloadedSize(bodyData.count)
+        #endif
     }
 
     func cancel() async {
