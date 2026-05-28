@@ -248,11 +248,20 @@ public struct Config: Hashable, Sendable,
             case let obj as Bool:
                 Config(obj)
             case let obj as NSNumber:
+                #if canImport(Darwin)
                 if CFNumberIsFloatType(obj) {
                     Config(obj.floatValue)
                 } else {
                     Config(obj.intValue)
                 }
+                #else
+                let typeChar = String(cString: obj.objCType)
+                if typeChar == "f" || typeChar == "d" {
+                    Config(obj.floatValue)
+                } else {
+                    Config(obj.intValue)
+                }
+                #endif
             case _ as NSNull:
                 Config()
             case let obj as Config:
